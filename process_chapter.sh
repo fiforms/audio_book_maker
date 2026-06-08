@@ -22,7 +22,7 @@ set -euo pipefail
 # ── Resolve paths ─────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROGRAM_DIR="$SCRIPT_DIR/program"
+PROGRAM_DIR="$SCRIPT_DIR"
 
 SPLIT_SCRIPT="$PROGRAM_DIR/split_book_pages.py"
 CLEAN_SCRIPT="$PROGRAM_DIR/clean_book_text.py"
