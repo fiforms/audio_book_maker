@@ -24,7 +24,10 @@ import argparse
 import io
 from pathlib import Path
 
+import cv2
+import numpy as np
 from pdf2image import convert_from_path
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -54,6 +57,18 @@ JPEG_QUALITY = 85
 
 
 ROTATION_ALIASES = {"cw": -90, "ccw": 90, "invert": 180, "none": 0}
+
+def normalize_illumination(img: Image.Image) -> Image.Image:
+    """Remove shadow / uneven lighting by dividing out the estimated background."""
+    arr = np.array(img, dtype=np.float32)
+    w = arr.shape[1]
+    # Large kernel captures the slow illumination gradient (gutter shadow) while
+    # ignoring fine detail like text.  Must be odd; floor to at least 51px.
+    ksize = max(w // 10, 51) | 1
+    bg = cv2.GaussianBlur(arr, (ksize, ksize), 0)
+    bg = np.maximum(bg, 1.0)  # avoid division by near-zero
+    normalized = np.clip(arr * (255.0 / bg), 0, 255).astype(np.uint8)
+    return Image.fromarray(normalized, mode=img.mode)
 
 
 def parse_rotation(value: str) -> int:
@@ -139,7 +154,7 @@ def process_pdf(input_path: str, output_path: str, rotate_degrees: int, boundari
             if limit is not None and out_written >= limit:
                 break
             buf = io.BytesIO()
-            crop.save(buf, format="PDF", resolution=TARGET_DPI)
+            normalize_illumination(crop).save(buf, format="PDF", resolution=TARGET_DPI)
             buf.seek(0)
             writer.add_page(PdfReader(buf).pages[0])
             out_index += 1
