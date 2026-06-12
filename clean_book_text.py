@@ -175,6 +175,12 @@ def clean(text: str) -> str:
     for old, new in replacements:
         text_out = text_out.replace(old, new)
 
+    # ── Pass 7: strip stray degree symbols ────────────────────────────────────
+    # Drop every '°' EXCEPT one immediately preceded by a digit (e.g. "70°"),
+    # which is a genuine temperature/angle and should be kept. Also consume one
+    # trailing space so removal doesn't leave a double space.
+    text_out = re.sub(r'(?<!\d)° ?', '', text_out)
+
     return text_out.strip()
 
 
