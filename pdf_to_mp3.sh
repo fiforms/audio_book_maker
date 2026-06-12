@@ -4,7 +4,7 @@
 # Extracts and cleans text from an OCR'd PDF, then generates an MP3 via TTS.
 #
 # Usage:
-#   ./pdf_to_mp3.sh chapter1_ocr.pdf [--no-footnotes]
+#   ./pdf_to_mp3.sh chapter1_ocr.pdf [--no-footnotes] [--strip-asterisks]
 #
 # Outputs (alongside the input PDF):
 #   chapter1_ocr_cleantext.txt
@@ -27,7 +27,10 @@ VOICES_BIN="$SCRIPT_DIR/voices-v1.0.bin"
 # ── Parse arguments ───────────────────────────────────────────────────────────
 
 NO_FOOTNOTES=0
+STRIP_ASTERISKS=0
 INPUT_PDF=""
+
+USAGE="Usage: $0 <input_ocr.pdf> [--no-footnotes] [--strip-asterisks]"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -35,15 +38,19 @@ while [[ $# -gt 0 ]]; do
             NO_FOOTNOTES=1
             shift
             ;;
+        --strip-asterisks)
+            STRIP_ASTERISKS=1
+            shift
+            ;;
         -*)
             echo "Unknown option: $1"
-            echo "Usage: $0 <input_ocr.pdf> [--no-footnotes]"
+            echo "$USAGE"
             exit 1
             ;;
         *)
             if [[ -n "$INPUT_PDF" ]]; then
                 echo "Unexpected argument: $1"
-                echo "Usage: $0 <input_ocr.pdf> [--no-footnotes]"
+                echo "$USAGE"
                 exit 1
             fi
             INPUT_PDF="$1"
@@ -53,8 +60,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$INPUT_PDF" ]]; then
-    echo "Usage: $0 <input_ocr.pdf> [--no-footnotes]"
+    echo "$USAGE"
     exit 1
+fi
+
+# --strip-asterisks is forwarded to whichever extractor runs; both ultimately
+# chain to clean_book_text.py, which implements the actual stripping.
+CLEAN_OPTS=()
+if [[ "$STRIP_ASTERISKS" -eq 1 ]]; then
+    CLEAN_OPTS+=(--strip-asterisks)
 fi
 
 INPUT_PDF="$(realpath "$INPUT_PDF")"
@@ -116,7 +130,7 @@ echo ""
 
 if [[ "$NO_FOOTNOTES" -eq 1 ]]; then
     echo "[1/2] Extracting text (removing footnotes)..."
-    python3 "$EXTRACT_SCRIPT" "$INPUT_PDF" --output "$CLEAN_TXT"
+    python3 "$EXTRACT_SCRIPT" "$INPUT_PDF" --output "$CLEAN_TXT" "${CLEAN_OPTS[@]}"
     echo ""
 
     echo "[2/2] Generating MP3..."
@@ -130,7 +144,7 @@ else
     echo ""
 
     echo "[2/3] Cleaning text..."
-    python3 "$CLEAN_SCRIPT" "$RAW_TXT" "$CLEAN_TXT"
+    python3 "$CLEAN_SCRIPT" "${CLEAN_OPTS[@]}" "$RAW_TXT" "$CLEAN_TXT"
     echo ""
 
     echo "[3/3] Generating MP3..."

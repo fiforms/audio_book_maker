@@ -100,16 +100,18 @@ def ocr_region(image_bgr: np.ndarray, lang: str) -> str:
         os.unlink(tmp_path)
 
 
-def run_clean(raw_txt: Path, clean_txt: Path, script_dir: Path) -> None:
+def run_clean(raw_txt: Path, clean_txt: Path, script_dir: Path,
+              strip_asterisks: bool = False) -> None:
     clean_script = script_dir / "clean_book_text.py"
     if not clean_script.exists():
         print(f"  [warn] clean_book_text.py not found at {clean_script}, skipping clean step",
               file=sys.stderr)
         return
-    subprocess.run(
-        ["python3", str(clean_script), str(raw_txt), str(clean_txt)],
-        check=True,
-    )
+    cmd = ["python3", str(clean_script)]
+    if strip_asterisks:
+        cmd.append("--strip-asterisks")
+    cmd += [str(raw_txt), str(clean_txt)]
+    subprocess.run(cmd, check=True)
 
 
 def process_pdf(
@@ -120,6 +122,7 @@ def process_pdf(
     dpi: int,
     lang: str,
     script_dir: Path,
+    strip_asterisks: bool = False,
 ) -> None:
     print(f"Rendering {input_pdf.name} at {dpi} DPI...", flush=True)
     pages = convert_from_path(str(input_pdf), dpi=dpi)
@@ -163,7 +166,7 @@ def process_pdf(
     raw_txt.write_text(combined, encoding="utf-8")
     total_words = len(combined.split())
     print(f"\n[2/2] Cleaning text...", flush=True)
-    run_clean(raw_txt, clean_txt, script_dir)
+    run_clean(raw_txt, clean_txt, script_dir, strip_asterisks=strip_asterisks)
     print(f"\nWrote {total_words} raw words → {clean_txt.name}")
 
 
@@ -191,6 +194,10 @@ def main() -> None:
     parser.add_argument(
         "--lang", default="eng",
         help="Tesseract language code (default: eng)",
+    )
+    parser.add_argument(
+        "--strip-asterisks", action="store_true",
+        help="Pass through to clean_book_text.py: remove all asterisks so the TTS doesn't read them aloud",
     )
     args = parser.parse_args()
 
@@ -228,7 +235,8 @@ def main() -> None:
     print()
     print("[1/2] Extracting text (footnotes removed)...")
 
-    process_pdf(input_pdf, raw_txt, clean_txt, debug_dir, args.dpi, args.lang, script_dir)
+    process_pdf(input_pdf, raw_txt, clean_txt, debug_dir, args.dpi, args.lang, script_dir,
+                strip_asterisks=args.strip_asterisks)
 
     print()
     print("════════════════════════════════════════")

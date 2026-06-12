@@ -44,10 +44,10 @@ REPEATED_LINE_MIN_COUNT = 3
 # followed by a space is an OCR bullet, not a quotation.
 BULLET_CHARS = set("•◦●○■▪‣·°¢∘*©®§eo`'‘’")
 
-# What a recognised bullet marker is replaced with. "" strips the marker entirely
-# (best for TTS, so it isn't read aloud as "e"/"degree"/etc.); set to "• " instead
-# to keep a clean visible bullet.
-BULLET_REPLACEMENT = ""
+# What a recognised bullet marker is replaced with. A leading ". " gives the TTS
+# engine a sentence boundary so list items get a pause instead of running into
+# each other. Use "" to strip the marker entirely, or "• " for a visible bullet.
+BULLET_REPLACEMENT = ". "
 
 # ── END CONFIGURATION ─────────────────────────────────────────────────────────
 
@@ -89,12 +89,13 @@ def is_page_number(line: str) -> bool:
 def bullet_candidate(line: str) -> str | None:
     """If `line` looks like a single leading marker + content, return that marker.
 
-    Matches '<one non-space char><whitespace><more content>', e.g. 'o Using …'
-    or '¢ Musical'. Returns the marker char only if it's a known bullet
-    substitute; otherwise None.
+    Matches '<one non-space char><whitespace><content>', e.g. 'o Using …'
+    or '¢ Musical'. Returns the marker only if it's a known bullet substitute AND
+    the content has real (alphanumeric) text — so a 'separator' line of repeated
+    markers like '* * *' is left alone rather than mistaken for a bullet.
     """
-    m = re.match(r'\s*(\S)\s+\S', line)
-    if m and m.group(1) in BULLET_CHARS:
+    m = re.match(r'\s*(\S)\s+(\S.*)$', line)
+    if m and m.group(1) in BULLET_CHARS and any(c.isalnum() for c in m.group(2)):
         return m.group(1)
     return None
 
@@ -104,19 +105,53 @@ def normalize_bullets(lines: list[str]) -> list[str]:
 
     Every marker in BULLET_CHARS is converted unconditionally. Capital "O" is not
     a marker (see BULLET_CHARS), so a lone 'O Lord …' is left untouched.
+
+    Also closes off each list so it doesn't run into the following paragraph for
+    TTS: the leading ". " on each item ends the *previous* item, but the last
+    item has nothing after it, so we give the last non-blank line of every list
+    block a trailing period. A list block runs from its first bullet line until a
+    blank line (a paragraph break) or the end of the text — that blank line is the
+    only reliable signal for where the final item ends.
     """
+    is_bullet = [bullet_candidate(l) is not None for l in lines]
+
     out = []
-    for line in lines:
-        if bullet_candidate(line) is None:
+    for line, bullet in zip(lines, is_bullet):
+        if not bullet:
             out.append(line)
             continue
         indent = line[:len(line) - len(line.lstrip())]
         content = line.lstrip()[1:].lstrip()  # drop marker + following space
         out.append(indent + BULLET_REPLACEMENT + content)
+
+    def terminate(idx: int | None) -> None:
+        """Give the last line of a list block a full stop, if it lacks one."""
+        if idx is None:
+            return
+        s = out[idx].rstrip()
+        if not s or s[-1] in '.!?':
+            return
+        if s[-1] in ',;:':            # swap soft punctuation for a full stop
+            s = s[:-1]
+        out[idx] = s + '.'
+
+    in_list = False
+    last = None  # index of the last non-blank line seen in the current block
+    for i, line in enumerate(out):
+        if is_bullet[i]:
+            in_list, last = True, i
+        elif in_list:
+            if line.strip() == '':   # blank line ends the list block
+                terminate(last)
+                in_list, last = False, None
+            else:                    # continuation line of the current item
+                last = i
+    terminate(last)
+
     return out
 
 
-def clean(text: str) -> str:
+def clean(text: str, strip_asterisks: bool = False) -> str:
     lines = text.splitlines()
 
     # ── Pass 1: identify repeated headers/footers ─────────────────────────────
@@ -181,6 +216,17 @@ def clean(text: str) -> str:
     # trailing space so removal doesn't leave a double space.
     text_out = re.sub(r'(?<!\d)° ?', '', text_out)
 
+    # ── Pass 8: strip asterisks (opt-in) ──────────────────────────────────────
+    # Some scans are littered with asterisks (emphasis markers, "* * *" breaks)
+    # that the TTS reads aloud. Remove every '*', then tidy the whitespace it
+    # leaves behind (collapse double spaces, drop now-trailing spaces and any
+    # lines left blank).
+    if strip_asterisks:
+        text_out = text_out.replace('*', '')
+        text_out = re.sub(r'[ \t]{2,}', ' ', text_out)   # collapse double spaces
+        text_out = re.sub(r'[ \t]+\n', '\n', text_out)   # drop trailing spaces
+        text_out = re.sub(r'\n{3,}', '\n\n', text_out)   # re-collapse blank lines
+
     return text_out.strip()
 
 
@@ -190,10 +236,12 @@ def main():
     )
     parser.add_argument("input",  help="Input .txt file (or - for stdin)")
     parser.add_argument("output", help="Output .txt file")
+    parser.add_argument("--strip-asterisks", action="store_true",
+                        help="Remove all asterisks so the TTS doesn't read them aloud")
     args = parser.parse_args()
 
     raw = load_text(args.input)
-    result = clean(raw)
+    result = clean(raw, strip_asterisks=args.strip_asterisks)
 
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(result)
