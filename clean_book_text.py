@@ -7,6 +7,7 @@ Handles:
   - Hyphenated line breaks (re-joins split words)
   - Standalone page numbers (including OCR misreads like '1z' for '13')
   - Running headers/footers (repeated short lines across the document)
+  - OCR-mangled bullet markers (e / o / O / degree / cent substituted for •)
   - Excessive blank lines
   - Soft hyphens and other OCR ligature artifacts
 
@@ -32,6 +33,21 @@ SHORT_LINE_THRESHOLD = 40
 # A line appearing this many times across the whole document is likely a
 # running header or footer — remove all occurrences.
 REPEATED_LINE_MIN_COUNT = 3
+
+# Characters OCR commonly substitutes for a bullet glyph at the start of a line.
+# A lone one of these, followed by whitespace and content, is treated as a bullet.
+# NOTE: capital "O" is deliberately NOT included — it's a real word ("O Lord, …")
+# and leaving the occasional capital-O bullet unfixed is far safer than corrupting
+# genuine text. Lowercase "e"/"o" effectively never start a real sentence, so they
+# are safe to convert unconditionally. Quote-like glyphs (` ' ‘ ’) are safe too:
+# real prose attaches an opening quote to its word ('word), so a lone quote
+# followed by a space is an OCR bullet, not a quotation.
+BULLET_CHARS = set("•◦●○■▪‣·°¢∘*©®§eo`'‘’")
+
+# What a recognised bullet marker is replaced with. "" strips the marker entirely
+# (best for TTS, so it isn't read aloud as "e"/"degree"/etc.); set to "• " instead
+# to keep a clean visible bullet.
+BULLET_REPLACEMENT = ""
 
 # ── END CONFIGURATION ─────────────────────────────────────────────────────────
 
@@ -70,6 +86,36 @@ def is_page_number(line: str) -> bool:
     return bool(re.fullmatch(r'\s*\d+\s*', line))
 
 
+def bullet_candidate(line: str) -> str | None:
+    """If `line` looks like a single leading marker + content, return that marker.
+
+    Matches '<one non-space char><whitespace><more content>', e.g. 'o Using …'
+    or '¢ Musical'. Returns the marker char only if it's a known bullet
+    substitute; otherwise None.
+    """
+    m = re.match(r'\s*(\S)\s+\S', line)
+    if m and m.group(1) in BULLET_CHARS:
+        return m.group(1)
+    return None
+
+
+def normalize_bullets(lines: list[str]) -> list[str]:
+    """Replace OCR-mangled bullet markers (e/o/°/¢/…) with BULLET_REPLACEMENT.
+
+    Every marker in BULLET_CHARS is converted unconditionally. Capital "O" is not
+    a marker (see BULLET_CHARS), so a lone 'O Lord …' is left untouched.
+    """
+    out = []
+    for line in lines:
+        if bullet_candidate(line) is None:
+            out.append(line)
+            continue
+        indent = line[:len(line) - len(line.lstrip())]
+        content = line.lstrip()[1:].lstrip()  # drop marker + following space
+        out.append(indent + BULLET_REPLACEMENT + content)
+    return out
+
+
 def clean(text: str) -> str:
     lines = text.splitlines()
 
@@ -85,6 +131,9 @@ def clean(text: str) -> str:
 
     # ── Pass 3: remove standalone page numbers ────────────────────────────────
     result_lines = [l for l in cleaned_lines if not is_page_number(l)]
+
+    # ── Pass 3b: normalize OCR-mangled bullet markers ─────────────────────────
+    result_lines = normalize_bullets(result_lines)
 
     # ── Pass 4: rejoin hyphenated line breaks ─────────────────────────────────
     # "vary-\ning" → "varying"
