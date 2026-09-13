@@ -59,10 +59,25 @@ def load_text(path: str) -> str:
         return f.read()
 
 
+def normalize_for_repeat(line: str) -> str:
+    """Strip page numbers/OCR junk glued onto a running header so that e.g.
+    '282 A SONG FOR THE SANCTUARY' and '294 A SONG FOR THE SANCTUARY |' both
+    normalize to 'A SONG FOR THE SANCTUARY' and get grouped together.
+    """
+    s = line.strip()
+    # Leading page number, allowing OCR digit misreads (e.g. "28u" for "284")
+    # in the last character or two — only when followed by the start of a
+    # capitalized header phrase, so ordinary prose isn't mistaken for one.
+    s = re.sub(r'^[0-9OoIlzZuUsS]{1,4}\s+(?=[A-Z])', '', s)
+    s = re.sub(r'\s+\d+$', '', s)   # trailing page number
+    s = re.sub(r'\s*\|\s*$', '', s)  # trailing OCR pipe artifact
+    return s.strip()
+
+
 def find_repeated_lines(lines: list[str]) -> set[str]:
     """Find short lines that repeat across the document (headers/footers)."""
-    short = [l.strip() for l in lines if 0 < len(l.strip()) < SHORT_LINE_THRESHOLD]
-    counts = Counter(short)
+    short = [normalize_for_repeat(l) for l in lines if 0 < len(l.strip()) < SHORT_LINE_THRESHOLD]
+    counts = Counter(l for l in short if l)
     return {line for line, count in counts.items() if count >= REPEATED_LINE_MIN_COUNT}
 
 
@@ -160,7 +175,7 @@ def clean(text: str, strip_asterisks: bool = False) -> str:
     # ── Pass 2: drop headers/footers and fix OCR digit misreads ──────────────
     cleaned_lines = []
     for line in lines:
-        if line.strip() in repeated:
+        if normalize_for_repeat(line) in repeated:
             continue
         cleaned_lines.append(fix_ocr_misreads(line))
 
