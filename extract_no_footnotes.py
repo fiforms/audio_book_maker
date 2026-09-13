@@ -42,14 +42,17 @@ def find_separator_y(image_bgr: np.ndarray, dpi: int) -> int | None:
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
 
+    # Binarize once over the whole page: dark ink on light paper → invert so
+    # lines/text are white. Re-running Otsu on small, nearly-blank crops
+    # below is unstable (it forces a bimodal split even on scan noise), so
+    # every ink check downstream reuses this single full-page binarization.
+    _, full_binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
     # Confine the search to the lower half of the page so we don't
     # accidentally catch column rules or section dividers near the top.
     y0 = int(h * 0.45)
     y1 = int(h * 0.98)
-    roi = gray[y0:y1, :]
-
-    # Binarize: dark ink on light paper → invert so lines are white.
-    _, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    binary = full_binary[y0:y1, :]
 
     # Morphological open with a horizontal kernel isolates horizontal runs of
     # connected dark pixels.  Minimum length = ~10% of page width.
@@ -64,13 +67,33 @@ def find_separator_y(image_bgr: np.ndarray, dpi: int) -> int | None:
     max_thickness = max(5, dpi // 60)   # ~5px at 300 dpi
     max_width = int(w * 0.75)           # ignore full-width page borders
 
-    best_y = None
+    # A hand-underlined phrase in the body text produces a thin horizontal
+    # contour that can otherwise look just like the separator (right width,
+    # right thickness). The real separator sits alone in whitespace between
+    # the body text and the footnotes; an underline sits right beneath a
+    # line of text, so both edges are checked for a clear, mostly-blank gap.
+    gap = max(8, dpi // 40)          # skip a small margin around the line itself
+    band = max(40, dpi // 8)         # how far above/below to check for text
+
+    candidates = []
     for cnt in contours:
         x, y, cw, ch = cv2.boundingRect(cnt)
         if cw >= min_len and ch <= max_thickness and cw <= max_width:
-            abs_y = y0 + y
-            if best_y is None or abs_y < best_y:
-                best_y = abs_y
+            candidates.append((y0 + y, ch))
+
+    def ink_fraction(region: np.ndarray) -> float:
+        if region.size == 0:
+            return 1.0
+        return float(region.mean()) / 255.0
+
+    best_y = None
+    for abs_y, ch in sorted(candidates):
+        above = full_binary[max(0, abs_y - band - gap):max(0, abs_y - gap), :]
+        below = full_binary[abs_y + ch + gap:abs_y + ch + gap + band, :]
+
+        if ink_fraction(above) < 0.08 and ink_fraction(below) < 0.13:
+            best_y = abs_y
+            break
 
     return best_y
 
