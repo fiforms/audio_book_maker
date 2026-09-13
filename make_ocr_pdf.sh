@@ -19,6 +19,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SPLIT_SCRIPT="$SCRIPT_DIR/split_book_pages.py"
 
+if [[ -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/.venv/bin/activate"
+fi
+
 # ── Parse arguments ───────────────────────────────────────────────────────────
 
 ROTATION_ARG=""

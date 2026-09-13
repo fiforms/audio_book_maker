@@ -24,6 +24,11 @@ TTS_SCRIPT="$SCRIPT_DIR/book_to_mp3.py"
 ONNX_MODEL="$SCRIPT_DIR/kokoro-v1.0.onnx"
 VOICES_BIN="$SCRIPT_DIR/voices-v1.0.bin"
 
+if [[ -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/.venv/bin/activate"
+fi
+
 # ── Parse arguments ───────────────────────────────────────────────────────────
 
 NO_FOOTNOTES=0
